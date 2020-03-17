@@ -24,6 +24,7 @@
 #include <memory>
 #include <stdint.h>
 #include <utility>
+#include <wx/dataobj.h>
 #include <wx/wx.h>
 
 #include "buffer.hpp"
@@ -55,6 +56,11 @@ namespace REHex {
 				std::shared_ptr<const wxString> text;
 				
 				Comment(const wxString &text);
+				
+				bool operator==(const Comment &rhs) const
+				{
+					return *text == *(rhs.text);
+				}
 				
 				wxString menu_preview() const;
 			};
@@ -94,6 +100,9 @@ namespace REHex {
 			InlineCommentMode get_inline_comment_mode();
 			void set_inline_comment_mode(InlineCommentMode mode);
 			
+			bool get_highlight_selection_match();
+			void set_highlight_selection_match(bool highlight_selection_match);
+			
 			off_t get_cursor_position() const;
 			void set_cursor_position(off_t off);
 			bool get_insert_mode();
@@ -117,6 +126,8 @@ namespace REHex {
 			void handle_paste(const std::string &clipboard_text);
 			std::string handle_copy(bool cut);
 			size_t copy_upper_limit();
+			
+			void handle_paste(const NestedOffsetLengthMap<Document::Comment> &clipboard_comments);
 			
 			void undo();
 			const char *undo_desc();
@@ -240,6 +251,8 @@ namespace REHex {
 			bool show_ascii;
 			
 			InlineCommentMode inline_comment_mode;
+			
+			bool highlight_selection_match;
 			
 			int     scroll_xoff;
 			int64_t scroll_yoff;
@@ -373,6 +386,27 @@ namespace REHex {
 		virtual void update_lines(REHex::Document &doc, wxDC &dc) override;
 		virtual void draw(REHex::Document &doc, wxDC &dc, int x, int64_t y) override;
 		virtual wxCursor cursor_for_point(REHex::Document &doc, int x, int64_t y_lines, int y_px) override;
+	};
+	
+	class CommentsDataObject: public wxCustomDataObject
+	{
+		private:
+			struct Header
+			{
+				off_t file_offset;
+				off_t file_length;
+				
+				size_t text_length;
+			};
+			
+		public:
+			static const wxDataFormat format;
+			
+			CommentsDataObject();
+			CommentsDataObject(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base = 0);
+			
+			NestedOffsetLengthMap<Document::Comment> get_comments() const;
+			void set_comments(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base = 0);
 	};
 }
 

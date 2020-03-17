@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include <algorithm>
 #include <assert.h>
 #include <ctype.h>
 #include <inttypes.h>
@@ -24,6 +25,7 @@
 #include <map>
 #include <stack>
 #include <string>
+#include <wx/clipbrd.h>
 #include <wx/dcbuffer.h>
 
 #include "app.hpp"
@@ -53,6 +55,9 @@ enum {
 	ID_REDRAW_CURSOR = 1,
 	ID_SELECT_TIMER,
 	ID_CLEAR_HIGHLIGHT,
+	ID_EDIT_COMMENT,
+	ID_DELETE_COMMENT,
+	ID_COPY_COMMENT,
 };
 
 BEGIN_EVENT_TABLE(REHex::Document, wxControl)
@@ -230,6 +235,17 @@ void REHex::Document::set_inline_comment_mode(InlineCommentMode mode)
 	Refresh();
 }
 
+bool REHex::Document::get_highlight_selection_match()
+{
+	return highlight_selection_match;
+}
+
+void REHex::Document::set_highlight_selection_match(bool highlight_selection_match)
+{
+	this->highlight_selection_match = highlight_selection_match;
+	Refresh();
+}
+
 off_t REHex::Document::get_cursor_position() const
 {
 	return this->cpos_off;
@@ -374,6 +390,9 @@ const REHex::NestedOffsetLengthMap<REHex::Document::Comment> &REHex::Document::g
 
 bool REHex::Document::set_comment(off_t offset, off_t length, const Comment &comment)
 {
+	assert(offset >= 0);
+	assert(length >= 0);
+	
 	if(NestedOffsetLengthMap_set(comments, offset, length, comment))
 	{
 		_reinit_regions();
@@ -526,6 +545,51 @@ size_t REHex::Document::copy_upper_limit()
 		/* Nothing selected */
 		return 0;
 	}
+}
+
+void REHex::Document::handle_paste(const NestedOffsetLengthMap<Document::Comment> &clipboard_comments)
+{
+	off_t cursor_pos = get_cursor_position();
+	off_t buffer_length = this->buffer_length();
+	
+	for(auto cc = clipboard_comments.begin(); cc != clipboard_comments.end(); ++cc)
+	{
+		if((cursor_pos + cc->first.offset + cc->first.length) >= buffer_length)
+		{
+			wxMessageBox("Cannot paste comment(s) - would extend beyond end of file", "Error", (wxOK | wxICON_ERROR), this);
+			return;
+		}
+		
+		if(comments.find(NestedOffsetLengthMapKey(cursor_pos + cc->first.offset, cc->first.length)) != comments.end()
+			|| !NestedOffsetLengthMap_can_set(comments, cursor_pos + cc->first.offset, cc->first.length))
+		{
+			wxMessageBox("Cannot paste comment(s) - would overwrite one or more existing", "Error", (wxOK | wxICON_ERROR), this);
+			return;
+		}
+	}
+	
+	_tracked_change("paste comment(s)",
+		[this, cursor_pos, clipboard_comments]()
+		{
+			for(auto cc = clipboard_comments.begin(); cc != clipboard_comments.end(); ++cc)
+			{
+				NestedOffsetLengthMap_set(comments, cursor_pos + cc->first.offset, cc->first.length, cc->second);
+			}
+			
+			set_dirty(true);
+			
+			_reinit_regions();
+			
+			wxClientDC dc(this);
+			_recalc_regions(dc);
+			
+			_raise_comment_modified();
+		},
+		[this]()
+		{
+			/* Comments are restored implicitly. */
+			_raise_comment_modified();
+		});
 }
 
 void REHex::Document::undo()
@@ -1543,12 +1607,13 @@ void REHex::Document::OnLeftDown(wxMouseEvent &event)
 			*/
 			
 			int hf_width = hf_char_width();
+			int indent_width = _indent_width(cr->indent_depth);
 			
 			if(
 				(line_off > 0 || (mouse_y % hf_height) >= (hf_height / 4)) /* Not above top edge. */
 				&& (line_off < (cr->y_lines - 1) || (mouse_y % hf_height) <= ((hf_height / 4) * 3)) /* Not below bottom edge. */
-				&& rel_x >= (hf_width / 4) /* Not left of left edge. */
-				&& rel_x < (virtual_width - (hf_width / 4))) /* Not right of right edge. */
+				&& rel_x >= (indent_width + (hf_width / 4)) /* Not left of left edge. */
+				&& rel_x < ((virtual_width - (hf_width / 4)) - indent_width)) /* Not right of right edge. */
 			{
 				edit_comment_popup(cr->c_offset, cr->c_length);
 			}
@@ -1801,6 +1866,66 @@ void REHex::Document::OnRightDown(wxMouseEvent &event)
 			}
 			
 			PopupMenu(&menu);
+		}
+		
+		REHex::Document::Region::Comment *cr = dynamic_cast<REHex::Document::Region::Comment*>(*region);
+		if(cr != NULL)
+		{
+			/* Mouse was clicked within a Comment region, ensure we are within the border drawn around the
+			 * comment text.
+			*/
+			
+			int hf_width = hf_char_width();
+			int indent_width = _indent_width(cr->indent_depth);
+			
+			if(
+				(line_off > 0 || (mouse_y % hf_height) >= (hf_height / 4)) /* Not above top edge. */
+				&& (line_off < (cr->y_lines - 1) || (mouse_y % hf_height) <= ((hf_height / 4) * 3)) /* Not below bottom edge. */
+				&& rel_x >= (indent_width + (hf_width / 4)) /* Not left of left edge. */
+				&& rel_x < ((virtual_width - (hf_width / 4)) - indent_width)) /* Not right of right edge. */
+			{
+				wxMenu menu;
+				
+				menu.Append(ID_EDIT_COMMENT, "&Edit comment");
+				menu.Bind(wxEVT_MENU, [this, cr](wxCommandEvent &event)
+				{
+					edit_comment_popup(cr->c_offset, cr->c_length);
+				}, ID_EDIT_COMMENT, ID_EDIT_COMMENT);
+				
+				menu.Append(ID_DELETE_COMMENT, "&Delete comment");
+				menu.Bind(wxEVT_MENU, [this, cr](wxCommandEvent &event)
+				{
+					_tracked_change("delete comment",
+						[this, cr]()
+						{
+							wxClientDC dc(this);
+							_delete_comment(dc, cr->c_offset, cr->c_length);
+							_raise_comment_modified();
+						},
+						[this]()
+						{
+							/* Comments are restored implicitly. */
+							_raise_comment_modified();
+						});
+				}, ID_DELETE_COMMENT, ID_DELETE_COMMENT);
+				
+				menu.AppendSeparator();
+				
+				menu.Append(ID_COPY_COMMENT,  "&Copy comment(s)");
+				menu.Bind(wxEVT_MENU, [this, cr](wxCommandEvent &event)
+				{
+					ClipboardGuard cg;
+					if(cg)
+					{
+						auto selected_comments = NestedOffsetLengthMap_get_recursive(comments, NestedOffsetLengthMapKey(cr->c_offset, cr->c_length));
+						assert(selected_comments.size() > 0);
+						
+						wxTheClipboard->SetData(new CommentsDataObject(selected_comments, cr->c_offset));
+					}
+				}, ID_COPY_COMMENT, ID_COPY_COMMENT);
+				
+				PopupMenu(&menu);
+			}
 		}
 	}
 	
@@ -2063,6 +2188,7 @@ void REHex::Document::_ctor_pre(wxWindow *parent)
 	bytes_per_group   = 4;
 	show_ascii        = true;
 	inline_comment_mode = ICM_FULL_INDENT;
+	highlight_selection_match = false;
 	scroll_xoff       = 0;
 	scroll_yoff       = 0;
 	scroll_yoff_max   = 0;
@@ -2586,6 +2712,9 @@ void REHex::Document::_tracked_change(const char *desc, std::function< void() > 
 
 void REHex::Document::_set_comment_text(wxDC &dc, off_t offset, off_t length, const wxString &text)
 {
+	assert(offset >= 0);
+	assert(length >= 0);
+	
 	if(NestedOffsetLengthMap_set(comments, offset, length, Comment(text)))
 	{
 		set_dirty(true);
@@ -3165,7 +3294,13 @@ void REHex::Document::Region::draw_container(REHex::Document &doc, wxDC &dc, int
 }
 
 REHex::Document::Region::Data::Data(off_t d_offset, off_t d_length, int indent_depth):
-	d_offset(d_offset), d_length(d_length), bytes_per_line_actual(1) { this->indent_depth = indent_depth; }
+	d_offset(d_offset), d_length(d_length), bytes_per_line_actual(1)
+{
+	assert(d_offset >= 0);
+	assert(d_length >= 0);
+	
+	this->indent_depth = indent_depth;
+}
 
 void REHex::Document::Region::Data::update_lines(REHex::Document &doc, wxDC &dc)
 {
@@ -3218,6 +3353,13 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 	{
 		dc.SetTextForeground((*active_palette)[Palette::PAL_SELECTED_TEXT_FG]);
 		dc.SetTextBackground((*active_palette)[Palette::PAL_SELECTED_TEXT_BG]);
+		dc.SetBackgroundMode(wxSOLID);
+	};
+	
+	auto secondary_selected_text_colour = [&dc]()
+	{
+		dc.SetTextForeground((*active_palette)[Palette::PAL_SECONDARY_SELECTED_TEXT_FG]);
+		dc.SetTextBackground((*active_palette)[Palette::PAL_SECONDARY_SELECTED_TEXT_BG]);
 		dc.SetBackgroundMode(wxSOLID);
 	};
 	
@@ -3291,6 +3433,18 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 		data_err = true;
 	}
 	
+	std::vector<unsigned char> selection_data;
+	if(doc.highlight_selection_match && doc.selection_length > 0)
+	{
+		try {
+			selection_data = doc.buffer->read_data(doc.selection_off, doc.selection_length);
+		}
+		catch(const std::exception &e)
+		{
+			fprintf(stderr, "Exception in REHex::Document::Region::Data::draw: %s\n", e.what());
+		}
+	}
+	
 	/* The offset of the character in the Buffer currently being drawn. */
 	off_t cur_off = d_offset + skip_bytes;
 	
@@ -3298,6 +3452,8 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 	bool ascii_active = doc.HasFocus() && doc.cursor_state == CSTATE_ASCII;
 	
 	off_t cursor_pos = doc.get_cursor_position();
+	
+	size_t secondary_selection_remain = 0;
 	
 	for(auto di = data.begin();;)
 	{
@@ -3379,6 +3535,13 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 				hex_x = hex_base_x + doc.hf_string_width(++hex_x_char);
 			}
 			
+			if(secondary_selection_remain == 0
+				&& (size_t)(data.end() - di) >= selection_data.size()
+				&& std::equal(selection_data.begin(), selection_data.end(), di))
+			{
+				secondary_selection_remain = selection_data.size();
+			}
+			
 			unsigned char byte        = *(di++);
 			unsigned char high_nibble = (byte & 0xF0) >> 4;
 			unsigned char low_nibble  = (byte & 0x0F);
@@ -3405,6 +3568,15 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 					&& hex_active)
 				{
 					selected_text_colour();
+					
+					char str[] = { nibble_to_hex[nibble], '\0' };
+					dc.DrawText(str, hex_x, y);
+					
+					hex_str.append(1, ' ');
+				}
+				else if(secondary_selection_remain > 0 && !(cur_off >= doc.selection_off && cur_off < (doc.selection_off + doc.selection_length)))
+				{
+					secondary_selected_text_colour();
 					
 					char str[] = { nibble_to_hex[nibble], '\0' };
 					dc.DrawText(str, hex_x, y);
@@ -3522,16 +3694,6 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 					? byte
 					: '.';
 				
-				if(highlight != doc.highlights.end() && !ascii_active)
-				{
-					highlighted_text_colour(highlight->second);
-					
-					char str[] = { ascii_byte, '\0' };
-					dc.DrawText(str, ascii_x, y);
-					
-					ascii_string.append(" ");
-				}
-				
 				if(ascii_active)
 				{
 					if(cur_off == cursor_pos && !doc.insert_mode && doc.cursor_visible)
@@ -3552,6 +3714,15 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 						
 						ascii_string.append(" ");
 					}
+					else if(secondary_selection_remain > 0)
+					{
+						secondary_selected_text_colour();
+						
+						char str[] = { ascii_byte, '\0' };
+						dc.DrawText(str, ascii_x, y);
+						
+						ascii_string.append(" ");
+					}
 					else if(highlight != doc.highlights.end())
 					{
 						highlighted_text_colour(highlight->second);
@@ -3566,8 +3737,25 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 					}
 				}
 				else{
-					if(highlight == doc.highlights.end())
+					if(secondary_selection_remain > 0 && !(cur_off >= doc.selection_off && cur_off < (doc.selection_off + doc.selection_length)) && !ascii_active)
 					{
+						secondary_selected_text_colour();
+						
+						char str[] = { ascii_byte, '\0' };
+						dc.DrawText(str, ascii_x, y);
+						
+						ascii_string.append(" ");
+					}
+					else if(highlight != doc.highlights.end() && !ascii_active)
+					{
+						highlighted_text_colour(highlight->second);
+						
+						char str[] = { ascii_byte, '\0' };
+						dc.DrawText(str, ascii_x, y);
+						
+						ascii_string.append(" ");
+					}
+					else{
 						ascii_string.append(1, ascii_byte);
 					}
 					
@@ -3616,6 +3804,11 @@ void REHex::Document::Region::Data::draw(REHex::Document &doc, wxDC &dc, int x, 
 			}
 			
 			++cur_off;
+			
+			if(secondary_selection_remain > 0)
+			{
+				--secondary_selection_remain;
+			}
 		}
 		
 		normal_text_colour();
@@ -3871,16 +4064,82 @@ void REHex::Document::Region::Comment::draw(REHex::Document &doc, wxDC &dc, int 
 wxCursor REHex::Document::Region::Comment::cursor_for_point(REHex::Document &doc, int x, int64_t y_lines, int y_px)
 {
 	int hf_width = doc.hf_char_width();
+	int indent_width = doc._indent_width(indent_depth);
 	
 	if(
 		(y_lines > 0 || y_px >= (doc.hf_height / 4)) /* Not above top edge. */
 		&& (y_lines < (this->y_lines - 1) || y_px <= ((doc.hf_height / 4) * 3)) /* Not below bottom edge. */
-		&& x >= (hf_width / 4) /* Not left of left edge. */
-		&& x < (doc.virtual_width - (hf_width / 4))) /* Not right of right edge. */
+		&& x >= (indent_width + (hf_width / 4)) /* Not left of left edge. */
+		&& x < ((doc.virtual_width - (hf_width / 4)) - indent_width)) /* Not right of right edge. */
 	{
 		return wxCursor(wxCURSOR_HAND);
 	}
 	else{
 		return wxNullCursor;
 	}
+}
+
+const wxDataFormat REHex::CommentsDataObject::format("rehex/comments/v1");
+
+REHex::CommentsDataObject::CommentsDataObject():
+	wxCustomDataObject(format) {}
+
+REHex::CommentsDataObject::CommentsDataObject(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base):
+	wxCustomDataObject(format)
+{
+	set_comments(comments, base);
+}
+
+REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::CommentsDataObject::get_comments() const
+{
+	REHex::NestedOffsetLengthMap<REHex::Document::Comment> comments;
+	
+	const unsigned char *data = (const unsigned char*)(GetData());
+	const unsigned char *end = data + GetSize();
+	const Header *header;
+	
+	while(data + sizeof(Header) < end && (header = (const Header*)(data)), (data + sizeof(Header) + header->text_length <= end))
+	{
+		wxString text(wxString::FromUTF8((const char*)(header + 1), header->text_length));
+		
+		bool x = NestedOffsetLengthMap_set(comments, header->file_offset, header->file_length, REHex::Document::Comment(text));
+		assert(x); /* TODO: Raise some kind of error. Beep? */
+		
+		data += sizeof(Header) + header->text_length;
+	}
+	
+	return comments;
+}
+
+void REHex::CommentsDataObject::set_comments(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base)
+{
+	size_t size = 0;
+	
+	for(auto i = comments.begin(); i != comments.end(); ++i)
+	{
+		size += sizeof(Header) + (*i)->second.text->utf8_str().length();
+	}
+	
+	void *data = Alloc(size); /* Wrapper around new[] - throws on failure */
+	
+	char *outp = (char*)(data);
+	
+	for(auto i = comments.begin(); i != comments.end(); ++i)
+	{
+		Header *header = (Header*)(outp);
+		outp += sizeof(Header);
+		
+		const wxScopedCharBuffer utf8_text = (*i)->second.text->utf8_str();
+		
+		header->file_offset = (*i)->first.offset - base;
+		header->file_length = (*i)->first.length;
+		header->text_length = utf8_text.length();
+		
+		memcpy(outp, utf8_text.data(), utf8_text.length());
+		outp += utf8_text.length();
+	}
+	
+	assert(((char*)(data) + size) == outp);
+	
+	TakeData(size, data);
 }
