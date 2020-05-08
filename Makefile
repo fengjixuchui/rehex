@@ -22,10 +22,10 @@ EMBED_EXE ?= ./tools/embed
 
 # Wrapper around the $(shell) function that aborts the build if the command
 # exits with a nonzero status.
-shell-or-die = \
-	$(eval sod_out := $(shell $(1); echo $$?)) \
-	$(if $(filter 0,$(lastword $(sod_out))), \
-		$(wordlist 1, $(shell echo $$(($(words $(sod_out)) - 1))), $(sod_out)), \
+shell-or-die = $\
+	$(eval sod_out := $(shell $(1); echo $$?))$\
+	$(if $(filter 0,$(lastword $(sod_out))),$\
+		$(wordlist 1, $(shell echo $$(($(words $(sod_out)) - 1))), $(sod_out)),$\
 		$(error $(1) exited with status $(lastword $(sod_out))))
 
 WX_CXXFLAGS := $(call shell-or-die,$(WX_CONFIG) --cxxflags base core aui propgrid adv)
@@ -106,8 +106,19 @@ else
 	CXXFLAGS += -g
 endif
 
-VERSION    := Snapshot $(shell git log -1 --format="%H")
-BUILD_DATE := $(shell date '+%F')
+# Define this for releases
+# VERSION := x
+
+# NOTE: Not evaluated when building from dist
+GIT_COMMIT_SHA  ?= $(call shell-or-die,git log -1 --format="%H")
+GIT_COMMIT_TIME  = $(call shell-or-die,git log -1 --format="%ct")
+
+ifdef VERSION
+	LONG_VERSION := Version $(VERSION)
+else
+	VERSION      := $(GIT_COMMIT_SHA)
+	LONG_VERSION := Snapshot $(GIT_COMMIT_SHA)
+endif
 
 DEPDIR := .d
 $(shell mkdir -p $(DEPDIR)/res/ $(DEPDIR)/src/ $(DEPDIR)/tools/ $(DEPDIR)/tests/ $(DEPDIR)/googletest/src/)
@@ -130,6 +141,9 @@ clean:
 	rm -f ./tests/all-tests
 	rm -f $(EMBED_EXE)
 
+.PHONY: distclean
+distclean: clean
+
 APP_OBJS := \
 	res/icon16.o \
 	res/icon32.o \
@@ -137,7 +151,6 @@ APP_OBJS := \
 	res/icon64.o \
 	res/icon128.o \
 	res/license.o \
-	res/version.o \
 	src/AboutDialog.o \
 	src/app.o \
 	src/buffer.o \
@@ -145,27 +158,41 @@ APP_OBJS := \
 	src/CodeCtrl.o \
 	src/CommentTree.o \
 	src/decodepanel.o \
+	src/DiffWindow.o \
 	src/disassemble.o \
 	src/document.o \
+	src/DocumentCtrl.o \
+	src/EditCommentDialog.o \
+	src/Events.o \
 	src/LicenseDialog.o \
 	src/mainwindow.o \
 	src/Palette.o \
 	src/search.o \
 	src/SelectRangeDialog.o \
 	src/textentrydialog.o \
+	src/Tab.o \
 	src/ToolPanel.o \
 	src/util.o \
 	src/win32lib.o \
 	$(EXTRA_APP_OBJS)
 
 $(EXE): $(APP_OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -c -o res/version.o res/version.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^ res/version.o $(LIBS)
 
 TEST_OBJS := \
 	googletest/src/gtest-all.o \
+	res/icon16.o \
+	res/icon32.o \
+	res/icon48.o \
+	res/icon64.o \
 	src/buffer.o \
 	src/CommentTree.o \
+	src/DiffWindow.o \
 	src/document.o \
+	src/DocumentCtrl.o \
+	src/EditCommentDialog.o \
+	src/Events.o \
 	src/Palette.o \
 	src/search.o \
 	src/textentrydialog.o \
@@ -175,13 +202,15 @@ TEST_OBJS := \
 	tests/buffer.o \
 	tests/CommentsDataObject.o \
 	tests/CommentTree.o \
-	tests/document.o \
+	tests/DiffWindow.o \
+	tests/Document.o \
 	tests/main.o \
 	tests/NestedOffsetLengthMap.o \
 	tests/NumericTextCtrl.o \
 	tests/search-bseq.o \
 	tests/search-text.o \
 	tests/SearchValue.o \
+	tests/SafeWindowPointer.o \
 	tests/util.o
 
 tests/all-tests: $(TEST_OBJS)
@@ -191,6 +220,7 @@ $(EMBED_EXE): tools/embed.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $<
 
 src/AboutDialog.o: res/icon128.h
+src/DiffWindow.o: res/icon16.h res/icon32.h res/icon48.h res/icon64.h
 src/LicenseDialog.o: res/license.h
 src/mainwindow.o: res/icon16.h res/icon32.h res/icon48.h res/icon64.h
 
@@ -199,10 +229,6 @@ res/license.c res/license.h: LICENSE.txt $(EMBED_EXE)
 
 res/%.c res/%.h: res/%.png $(EMBED_EXE)
 	$(EMBED_EXE) $< $*_png res/$*.c res/$*.h
-
-.PHONY: res/version.o
-res/version.o:
-	$(CXX) $(CXXFLAGS) -DVERSION='"$(VERSION)"' -DBUILD_DATE='"$(BUILD_DATE)"' -c -o $@ res/version.cpp
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
@@ -223,7 +249,8 @@ googletest/src/%.o: googletest/src/%.cc
 include $(shell find .d/ -name '*.d' -type f)
 
 prefix      ?= /usr/local
-bindir      ?= $(prefix)/bin
+exec_prefix ?= $(prefix)
+bindir      ?= $(exec_prefix)/bin
 datarootdir ?= $(prefix)/share
 
 .PHONY: install
@@ -246,3 +273,32 @@ uninstall:
 	do \
 		rm -f $(DESTDIR)$(datarootdir)/icons/hicolor/$${s}x$${s}/apps/rehex.png; \
 	done
+
+.PHONY: dist
+dist:
+	rm -rf rehex-$(VERSION) rehex-$(VERSION).tar
+	mkdir rehex-$(VERSION)/
+	
+ifneq ("$(wildcard MANIFEST)","")
+	# Running from a dist tarball, ship anything in the MANIFEST
+	xargs cp --parents -t rehex-$(VERSION)/ < MANIFEST
+else
+	# Running from the git tree, ship any checked in files
+	(git ls-files && echo MANIFEST) | LC_ALL=C sort > rehex-$(VERSION)/MANIFEST
+	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
+	
+	# Inline any references to the HEAD commit sha/timestamp
+	sed -i -e "s|\$$(GIT_COMMIT_SHA)|$(GIT_COMMIT_SHA)|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$$(GIT_COMMIT_TIME)|$(GIT_COMMIT_TIME)|g" rehex-$(VERSION)/Makefile
+endif
+	
+	# Generate reproducible tarball. All files use git commit timestamp.
+	find rehex-$(VERSION) -print0 | \
+		LC_ALL=C sort -z | \
+		tar \
+			--format=ustar \
+			--mtime=@$(GIT_COMMIT_TIME) \
+			--owner=0 --group=0 --numeric-owner \
+			--no-recursion --null  -T - \
+			-cf - | \
+		gzip -9n - > rehex-$(VERSION).tar.gz

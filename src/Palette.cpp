@@ -68,6 +68,22 @@ const wxColour &REHex::Palette::get_highlight_fg(int index) const
 	return palette[PAL_HIGHLIGHT_TEXT_MIN_FG + (index * 2)];
 }
 
+REHex::Palette::ColourIndex REHex::Palette::get_highlight_bg_idx(int index)
+{
+	assert(index >= 0);
+	assert(index < NUM_HIGHLIGHT_COLOURS);
+	
+	return (ColourIndex)(PAL_HIGHLIGHT_TEXT_MIN_BG + (index * 2));
+}
+
+REHex::Palette::ColourIndex REHex::Palette::get_highlight_fg_idx(int index)
+{
+	assert(index >= 0);
+	assert(index < NUM_HIGHLIGHT_COLOURS);
+	
+	return (ColourIndex)(PAL_HIGHLIGHT_TEXT_MIN_FG + (index * 2));
+}
+
 REHex::Palette *REHex::Palette::create_system_palette()
 {
 	const wxColour WINDOW        = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
@@ -96,6 +112,9 @@ REHex::Palette *REHex::Palette::create_system_palette()
 		(is_light(HIGHLIGHTTEXT)
 			? HIGHLIGHTTEXT.ChangeLightness(70)
 			: HIGHLIGHTTEXT.ChangeLightness(130)),  /* PAL_SECONDARY_SELECTED_TEXT_FG */
+		
+		WINDOW,                      /* PAL_DIRTY_TEXT_BG */
+		wxColour(0xFF, 0x00, 0x00),  /* PAL_DIRTY_TEXT_FG */
 		
 		/* TODO: Algorithmically choose highlight colours that complement system colour scheme. */
 		
@@ -147,6 +166,8 @@ REHex::Palette *REHex::Palette::create_light_palette()
 		wxColour(0xFF, 0xFF, 0xFF),  /* PAL_SELECTED_TEXT_FG */
 		wxColour(0x00, 0x00, 0x7F),  /* PAL_SECONDARY_SELECTED_TEXT_BG */
 		wxColour(0xFF, 0xFF, 0xFF),  /* PAL_SECONDARY_SELECTED_TEXT_FG */
+		wxColour(0xFF, 0xFF, 0xFF),  /* PAL_DIRTY_TEXT_BG */
+		wxColour(0xFF, 0x00, 0x00),  /* PAL_DIRTY_TEXT_FG */
 		
 		/* White on Red */
 		wxColour(0xFF, 0x00, 0x00),  /* PAL_HIGHLIGHT_TEXT_MIN_BG */
@@ -193,6 +214,8 @@ REHex::Palette *REHex::Palette::create_dark_palette()
 		wxColour(0xFF, 0xFF, 0xFF),  /* PAL_SELECTED_TEXT_FG */
 		wxColour(0x00, 0x00, 0x7F),  /* PAL_SECONDARY_SELECTED_TEXT_BG */
 		wxColour(0xFF, 0xFF, 0xFF),  /* PAL_SECONDARY_SELECTED_TEXT_FG */
+		wxColour(0x00, 0x00, 0x00),  /* PAL_DIRTY_TEXT_BG */
+		wxColour(0xFF, 0x00, 0x00),  /* PAL_DIRTY_TEXT_FG */
 		
 		/* White on Red */
 		wxColour(0xFF, 0x00, 0x00),  /* PAL_HIGHLIGHT_TEXT_MIN_BG */
