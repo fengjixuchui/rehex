@@ -17,9 +17,12 @@
 
 #include <algorithm>
 #include <set>
+#include <tuple>
+#include <wx/artprov.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
+#include "ArtProvider.hpp"
 #include "DiffWindow.hpp"
 #include "Palette.hpp"
 
@@ -28,53 +31,63 @@
 #include "../res/icon48.h"
 #include "../res/icon64.h"
 
+enum {
+	ID_SHOW_OFFSETS = 1,
+	ID_SHOW_ASCII,
+};
+
 BEGIN_EVENT_TABLE(REHex::DiffWindow, wxFrame)
 	EVT_SIZE(REHex::DiffWindow::OnSize)
 	EVT_IDLE(REHex::DiffWindow::OnIdle)
 	EVT_AUINOTEBOOK_PAGE_CLOSED(wxID_ANY, REHex::DiffWindow::OnNotebookClosed)
 	
 	EVT_CURSORUPDATE(wxID_ANY, REHex::DiffWindow::OnCursorUpdate)
+	
+	EVT_MENU(ID_SHOW_OFFSETS, REHex::DiffWindow::OnToggleOffsets)
+	EVT_MENU(ID_SHOW_ASCII,   REHex::DiffWindow::OnToggleASCII)
 END_EVENT_TABLE()
 
-REHex::DiffWindow::DiffWindow(wxWindow *parent, bool set_icons):
+REHex::DiffWindow::DiffWindow(wxWindow *parent):
 	wxFrame(parent, wxID_ANY, "Show differences - Reverse Engineers' Hex Editor", wxDefaultPosition, wxSize(740, 540))
 {
-	/* For some reason, trying to set up the icon bundle during unit tests triggers the
-	 * following assertion failure in wxWidgets:
-	 *
-	 * assert "icon.IsOk()" failed in AddIcon(): invalid icon
-	*/
+	wxToolBar *toolbar = CreateToolBar();
 	
-	if(set_icons)
+	show_offsets_button = toolbar->AddCheckTool(ID_SHOW_OFFSETS, "Show offsets", wxArtProvider::GetBitmap(ART_OFFSETS_ICON, wxART_TOOLBAR), wxNullBitmap, "Show offsets");
+	show_ascii_button   = toolbar->AddCheckTool(ID_SHOW_ASCII,   "Show ASCII",   wxArtProvider::GetBitmap(ART_ASCII_ICON,   wxART_TOOLBAR), wxNullBitmap, "Show ASCII");
+	
+	/* Enable offset and ASCII columns by default. */
+	show_offsets_button->Toggle(true);
+	show_ascii_button  ->Toggle(true);
+	
+	toolbar->Realize();
+	
+	/* TODO: Construct a single wxIconBundle instance somewhere. */
+	
+	wxIconBundle icons;
+	
 	{
-		/* TODO: Construct a single wxIconBundle instance somewhere. */
+		wxBitmap b16 = wxBITMAP_PNG_FROM_DATA(icon16);
+		wxIcon i16;
+		i16.CopyFromBitmap(b16);
+		icons.AddIcon(i16);
 		
-		wxIconBundle icons;
+		wxBitmap b32 = wxBITMAP_PNG_FROM_DATA(icon32);
+		wxIcon i32;
+		i32.CopyFromBitmap(b32);
+		icons.AddIcon(i32);
 		
-		{
-			wxBitmap b16 = wxBITMAP_PNG_FROM_DATA(icon16);
-			wxIcon i16;
-			i16.CopyFromBitmap(b16);
-			icons.AddIcon(i16);
-			
-			wxBitmap b32 = wxBITMAP_PNG_FROM_DATA(icon32);
-			wxIcon i32;
-			i32.CopyFromBitmap(b32);
-			icons.AddIcon(i32);
-			
-			wxBitmap b48 = wxBITMAP_PNG_FROM_DATA(icon48);
-			wxIcon i48;
-			i48.CopyFromBitmap(b48);
-			icons.AddIcon(i48);
-			
-			wxBitmap b64 = wxBITMAP_PNG_FROM_DATA(icon64);
-			wxIcon i64;
-			i64.CopyFromBitmap(b64);
-			icons.AddIcon(i64);
-		}
+		wxBitmap b48 = wxBITMAP_PNG_FROM_DATA(icon48);
+		wxIcon i48;
+		i48.CopyFromBitmap(b48);
+		icons.AddIcon(i48);
 		
-		SetIcons(icons);
+		wxBitmap b64 = wxBITMAP_PNG_FROM_DATA(icon64);
+		wxIcon i64;
+		i64.CopyFromBitmap(b64);
+		icons.AddIcon(i64);
 	}
+	
+	SetIcons(icons);
 }
 
 REHex::DiffWindow::~DiffWindow()
@@ -108,7 +121,7 @@ const std::list<REHex::DiffWindow::Range> &REHex::DiffWindow::get_ranges() const
 	return ranges;
 }
 
-void REHex::DiffWindow::add_range(const Range &range)
+std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const Range &range)
 {
 	auto new_range = ranges.insert(ranges.end(), range);
 	
@@ -160,6 +173,9 @@ void REHex::DiffWindow::add_range(const Range &range)
 	
 	doc_update(&*new_range);
 	
+	new_range->doc_ctrl->set_show_offsets(show_offsets_button->IsToggled());
+	new_range->doc_ctrl->set_show_ascii  (show_ascii_button  ->IsToggled());
+	
 	new_range->doc_ctrl->set_cursor_position(new_range->offset);
 	new_range->doc_ctrl->set_offset_display_base(new_range->main_doc_ctrl->get_offset_display_base());
 	
@@ -171,7 +187,6 @@ void REHex::DiffWindow::add_range(const Range &range)
 		
 		new_range->doc_ctrl->linked_scroll_insert_self_after(prev_range->doc_ctrl);
 		
-		// new_range->doc_ctrl->set_show_offsets(false);
 		new_range->splitter->Unsplit();
 	}
 	
@@ -190,6 +205,8 @@ void REHex::DiffWindow::add_range(const Range &range)
 	}
 	
 	resize_splitters();
+	
+	return new_range;
 }
 
 std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(std::list<Range>::iterator range)
@@ -425,6 +442,44 @@ void REHex::DiffWindow::OnDocumentDataErase(OffsetLengthEvent &event)
 					doc_update(&*r);
 				}
 			}
+			
+			off_t cursor_pos = r->doc_ctrl->get_cursor_position();
+			if(event.offset <= cursor_pos)
+			{
+				cursor_pos -= std::min(event.length, (cursor_pos - event.offset));
+				
+				if(cursor_pos >= (r->offset + r->length))
+				{
+					/* Move the cursor back if the end of the region is deleted under it. */
+					cursor_pos = r->offset + r->length - 1;
+				}
+				
+				assert(cursor_pos >= r->offset);
+				assert(cursor_pos < (r->offset + r->length));
+				
+				r->doc_ctrl->set_cursor_position(cursor_pos);
+			}
+			
+			off_t selection_off, selection_length;
+			std::tie(selection_off, selection_length) = r->doc_ctrl->get_selection();
+			
+			if(selection_length > 0)
+			{
+				if((event.offset < selection_off && (event.offset + event.length) > selection_off)
+					|| (event.offset >= selection_off && event.offset < (selection_off + selection_length)))
+				{
+					r->doc_ctrl->clear_selection();
+				}
+				else if(event.offset < selection_off)
+				{
+					selection_off -= event.length;
+					
+					assert(selection_off >= r->offset);
+					assert((selection_off + selection_length) <= (r->offset + r->length));
+					
+					r->doc_ctrl->set_selection(selection_off, selection_length);
+				}
+			}
 		}
 		
 		++r;
@@ -442,7 +497,7 @@ void REHex::DiffWindow::OnDocumentDataInsert(OffsetLengthEvent &event)
 	{
 		if(r->doc == src)
 		{
-			if(event.offset < r->offset)
+			if(event.offset <= r->offset)
 			{
 				r->offset += event.length;
 				doc_update(&*r);
@@ -451,6 +506,36 @@ void REHex::DiffWindow::OnDocumentDataInsert(OffsetLengthEvent &event)
 			{
 				r->length += event.length;
 				doc_update(&*r);
+			}
+			
+			off_t cursor_pos = r->doc_ctrl->get_cursor_position();
+			if(event.offset <= cursor_pos)
+			{
+				cursor_pos += event.length;
+				
+				assert(cursor_pos >= r->offset);
+				assert(cursor_pos < (r->offset + r->length));
+				
+				r->doc_ctrl->set_cursor_position(cursor_pos);
+			}
+			
+			off_t selection_off, selection_length;
+			std::tie(selection_off, selection_length) = r->doc_ctrl->get_selection();
+			if(selection_length > 0)
+			{
+				if(event.offset <= selection_off)
+				{
+					selection_off += event.length;
+					
+					assert(selection_off >= r->offset);
+					assert((selection_off + selection_length) <= (r->offset + r->length));
+					
+					r->doc_ctrl->set_selection(selection_off, selection_length);
+				}
+				else if(event.offset < (selection_off + selection_length))
+				{
+					r->doc_ctrl->clear_selection();
+				}
 			}
 		}
 	}
@@ -467,6 +552,16 @@ void REHex::DiffWindow::OnDocumentDataOverwrite(OffsetLengthEvent &event)
 	{
 		if(r->doc == src)
 		{
+			off_t selection_off, selection_length;
+			std::tie(selection_off, selection_length) = r->doc_ctrl->get_selection();
+			
+			if(selection_length > 0 && (
+				(event.offset < selection_off && (event.offset + event.length) > selection_off)
+				|| (event.offset >= selection_off && event.offset < (selection_off + selection_length))))
+			{
+				r->doc_ctrl->clear_selection();
+			}
+			
 			r->doc_ctrl->Refresh();
 		}
 	}
@@ -517,6 +612,26 @@ void REHex::DiffWindow::OnCursorUpdate(CursorUpdateEvent &event)
 			r->doc_ctrl->set_cursor_position(pos_from_r, event.cursor_state);
 		}
 	}
+}
+
+void REHex::DiffWindow::OnToggleOffsets(wxCommandEvent &event)
+{
+	for(auto r = ranges.begin(); r != ranges.end(); ++r)
+	{
+		r->doc_ctrl->set_show_offsets(event.IsChecked());
+	}
+	
+	resize_splitters();
+}
+
+void REHex::DiffWindow::OnToggleASCII(wxCommandEvent &event)
+{
+	for(auto r = ranges.begin(); r != ranges.end(); ++r)
+	{
+		r->doc_ctrl->set_show_ascii(event.IsChecked());
+	}
+	
+	resize_splitters();
 }
 
 REHex::DiffWindow::DiffDataRegion::DiffDataRegion(off_t d_offset, off_t d_length, DiffWindow *diff_window, Range *range):

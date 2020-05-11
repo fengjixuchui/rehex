@@ -65,14 +65,17 @@ namespace REHex {
 					off_t get_offset() const { return offset; }
 					off_t get_length() const { return length; }
 					
+					/* Not a gaping encapsulation hole in the name of testing. */
+					DocumentCtrl *_im_a_test_give_me_doc_ctrl() { return doc_ctrl; }
+					
 				friend DiffWindow;
 			};
 			
-			DiffWindow(wxWindow *parent, bool set_icons = true);
+			DiffWindow(wxWindow *parent);
 			virtual ~DiffWindow();
 			
 			const std::list<Range> &get_ranges() const;
-			void add_range(const Range &range);
+			std::list<Range>::iterator add_range(const Range &range);
 			
 		private:
 			class DiffDataRegion: public DocumentCtrl::DataRegion
@@ -87,6 +90,9 @@ namespace REHex {
 				protected:
 					virtual Highlight highlight_at_off(off_t off) const override;
 			};
+			
+			wxToolBarToolBase *show_offsets_button;
+			wxToolBarToolBase *show_ascii_button;
 			
 			std::list<Range> ranges;
 			
@@ -107,6 +113,8 @@ namespace REHex {
 			void OnDocumentBaseChange(wxCommandEvent &event);
 			void OnNotebookClosed(wxAuiNotebookEvent &event);
 			void OnCursorUpdate(CursorUpdateEvent &event);
+			void OnToggleOffsets(wxCommandEvent &event);
+			void OnToggleASCII(wxCommandEvent &event);
 			
 		DECLARE_EVENT_TABLE()
 	};
