@@ -17,14 +17,17 @@
 
 #include <algorithm>
 #include <set>
+#include <stdio.h>
 #include <tuple>
 #include <wx/artprov.h>
+#include <wx/clipbrd.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
 #include "ArtProvider.hpp"
 #include "DiffWindow.hpp"
 #include "Palette.hpp"
+#include "util.hpp"
 
 #include "../res/icon16.h"
 #include "../res/icon32.h"
@@ -39,9 +42,13 @@ enum {
 BEGIN_EVENT_TABLE(REHex::DiffWindow, wxFrame)
 	EVT_SIZE(REHex::DiffWindow::OnSize)
 	EVT_IDLE(REHex::DiffWindow::OnIdle)
+	EVT_CHAR_HOOK(REHex::DiffWindow::OnCharHook)
+	
 	EVT_AUINOTEBOOK_PAGE_CLOSED(wxID_ANY, REHex::DiffWindow::OnNotebookClosed)
 	
 	EVT_CURSORUPDATE(wxID_ANY, REHex::DiffWindow::OnCursorUpdate)
+	
+	EVT_COMMAND(wxID_ANY, REHex::DATA_RIGHT_CLICK, REHex::DiffWindow::OnDataRightClick)
 	
 	EVT_MENU(ID_SHOW_OFFSETS, REHex::DiffWindow::OnToggleOffsets)
 	EVT_MENU(ID_SHOW_ASCII,   REHex::DiffWindow::OnToggleASCII)
@@ -105,7 +112,7 @@ REHex::DiffWindow::~DiffWindow()
 	{
 		if(d->second != NULL)
 		{
-			d->second->Unbind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+			d->second->Unbind(EV_DISP_SETTING_CHANGED,  &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 		}
 		
 		d->first->Unbind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
@@ -178,6 +185,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const
 	
 	new_range->doc_ctrl->set_cursor_position(new_range->offset);
 	new_range->doc_ctrl->set_offset_display_base(new_range->main_doc_ctrl->get_offset_display_base());
+	new_range->doc_ctrl->set_bytes_per_group    (new_range->main_doc_ctrl->get_bytes_per_group());
 	
 	new_range->splitter->SplitVertically(new_range->notebook, new_range->help_panel);
 	
@@ -201,7 +209,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const
 		new_range->doc->Bind(DATA_INSERT,    &REHex::DiffWindow::OnDocumentDataInsert,    this);
 		new_range->doc->Bind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
 		
-		new_range->main_doc_ctrl->Bind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+		new_range->main_doc_ctrl->Bind(EV_DISP_SETTING_CHANGED, &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 	}
 	
 	resize_splitters();
@@ -269,7 +277,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 	{
 		if(range_mdc != NULL)
 		{
-			range_mdc->Unbind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+			range_mdc->Unbind(EV_DISP_SETTING_CHANGED, &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 		}
 		
 		range_doc->Unbind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
@@ -286,6 +294,12 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 	}
 	
 	resize_splitters();
+	
+	if(ranges.empty())
+	{
+		/* Last tab was closed. Destroy this DiffWindow. */
+		Destroy();
+	}
 	
 	return next;
 }
@@ -379,6 +393,26 @@ void REHex::DiffWindow::OnIdle(wxIdleEvent &event)
 		else{
 			++i;
 		}
+	}
+}
+
+void REHex::DiffWindow::OnCharHook(wxKeyEvent &event)
+{
+	if(event.GetModifiers() == wxMOD_CMD && event.GetKeyCode() == 'C')
+	{
+		wxWindow *focus_window = wxWindow::FindFocus();
+		
+		for(auto r = ranges.begin(); r != ranges.end(); ++r)
+		{
+			if(r->doc_ctrl == focus_window)
+			{
+				copy_from_doc(r->doc, r->doc_ctrl, this, false);
+				break;
+			}
+		}
+	}
+	else{
+		event.Skip();
 	}
 }
 
@@ -569,7 +603,7 @@ void REHex::DiffWindow::OnDocumentDataOverwrite(OffsetLengthEvent &event)
 	event.Skip();
 }
 
-void REHex::DiffWindow::OnDocumentBaseChange(wxCommandEvent &event)
+void REHex::DiffWindow::OnDocumentDisplaySettingsChange(wxCommandEvent &event)
 {
 	wxObject *src = event.GetEventObject();
 	
@@ -578,9 +612,15 @@ void REHex::DiffWindow::OnDocumentBaseChange(wxCommandEvent &event)
 		if(r->main_doc_ctrl == src)
 		{
 			r->doc_ctrl->set_offset_display_base(r->main_doc_ctrl->get_offset_display_base());
+			r->doc_ctrl->set_bytes_per_group(r->main_doc_ctrl->get_bytes_per_group());
 			r->notebook->SetPageText(0, range_title(&*r));
 		}
 	}
+	
+	/* Changing offset base or byte grouping may change how many bytes can fit on one line
+	 * without scrolling.
+	*/
+	resize_splitters();
 	
 	event.Skip();
 }
@@ -612,6 +652,58 @@ void REHex::DiffWindow::OnCursorUpdate(CursorUpdateEvent &event)
 			r->doc_ctrl->set_cursor_position(pos_from_r, event.cursor_state);
 		}
 	}
+}
+
+void REHex::DiffWindow::OnDataRightClick(wxCommandEvent &event)
+{
+	/* Find the Range whose DocumentCtrl raised this event. */
+	
+	auto source_range = std::find_if(ranges.begin(), ranges.end(), [&](const Range &r) { return r.doc_ctrl == event.GetEventObject(); });
+	assert(source_range != ranges.end());
+	
+	off_t cursor_pos = source_range->doc_ctrl->get_cursor_position();
+	
+	off_t selection_off, selection_length;
+	std::tie(selection_off, selection_length) = source_range->doc_ctrl->get_selection();
+	
+	wxMenu menu;
+	
+	menu.Append(wxID_COPY, "&Copy");
+	menu.Enable(wxID_COPY, (selection_length > 0));
+	menu.Bind(wxEVT_MENU, [&](wxCommandEvent &event)
+	{
+		copy_from_doc(source_range->doc, source_range->doc_ctrl, this, false);
+	}, wxID_COPY, wxID_COPY);
+	
+	menu.AppendSeparator();
+	
+	wxMenuItem *offset_copy_hex = menu.Append(wxID_ANY, "Copy offset (in hexadecimal)");
+	menu.Bind(wxEVT_MENU, [cursor_pos](wxCommandEvent &event)
+	{
+		ClipboardGuard cg;
+		if(cg)
+		{
+			char offset_str[24];
+			snprintf(offset_str, sizeof(offset_str), "0x%llX", (long long unsigned)(cursor_pos));
+			
+			wxTheClipboard->SetData(new wxTextDataObject(offset_str));
+		}
+	}, offset_copy_hex->GetId(), offset_copy_hex->GetId());
+	
+	wxMenuItem *offset_copy_dec = menu.Append(wxID_ANY, "Copy offset (in decimal)");
+	menu.Bind(wxEVT_MENU, [cursor_pos](wxCommandEvent &event)
+	{
+		ClipboardGuard cg;
+		if(cg)
+		{
+			char offset_str[24];
+			snprintf(offset_str, sizeof(offset_str), "%llu", (long long unsigned)(cursor_pos));
+			
+			wxTheClipboard->SetData(new wxTextDataObject(offset_str));
+		}
+	}, offset_copy_dec->GetId(), offset_copy_dec->GetId());
+	
+	PopupMenu(&menu);
 }
 
 void REHex::DiffWindow::OnToggleOffsets(wxCommandEvent &event)

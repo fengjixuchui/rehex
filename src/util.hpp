@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <wx/window.h>
 
 namespace REHex {
 	class ParseError: public std::runtime_error
@@ -76,6 +77,11 @@ namespace REHex {
 		return container.erase(const_iter, const_iter);
 		#endif
 	}
+	
+	class Document;
+	class DocumentCtrl;
+	
+	void copy_from_doc(Document *doc, DocumentCtrl *doc_ctrl, wxWindow *dialog_parent, bool cut);
 }
 
 #endif /* !REHEX_UTIL_HPP */

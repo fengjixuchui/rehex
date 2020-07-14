@@ -67,6 +67,7 @@ END_EVENT_TABLE()
 REHex::DocumentCtrl::DocumentCtrl(wxWindow *parent, SharedDocumentPointer &doc):
 	wxControl(),
 	doc(doc),
+	hex_font(wxFontInfo().Family(wxFONTFAMILY_MODERN)),
 	linked_scroll_prev(NULL),
 	linked_scroll_next(NULL),
 	redraw_cursor_timer(this, ID_REDRAW_CURSOR),
@@ -99,15 +100,11 @@ REHex::DocumentCtrl::DocumentCtrl(wxWindow *parent, SharedDocumentPointer &doc):
 	mouse_shift_initial = -1;
 	cursor_state      = Document::CSTATE_HEX;
 	
-	wxFontInfo finfo;
-	finfo.Family(wxFONTFAMILY_MODERN);
-	
-	hex_font = new wxFont(finfo);
-	assert(hex_font->IsFixedWidth());
+	assert(hex_font.IsFixedWidth());
 	
 	{
 		wxClientDC dc(this);
-		dc.SetFont(*hex_font);
+		dc.SetFont(hex_font);
 		
 		wxSize hf_char_size = dc.GetTextExtent("X");
 		hf_height           = hf_char_size.GetHeight();
@@ -164,6 +161,11 @@ void REHex::DocumentCtrl::set_bytes_per_group(unsigned int bytes_per_group)
 {
 	this->bytes_per_group = bytes_per_group;
 	_handle_width_change();
+
+	wxCommandEvent event(REHex::EV_DISP_SETTING_CHANGED);
+	event.SetEventObject(this);
+
+	wxPostEvent(this, event);
 }
 
 bool REHex::DocumentCtrl::get_show_offsets()
@@ -187,7 +189,7 @@ void REHex::DocumentCtrl::set_offset_display_base(REHex::OffsetBase offset_displ
 	this->offset_display_base = offset_display_base;
 	_handle_width_change();
 	
-	wxCommandEvent event(REHex::EV_BASE_CHANGED);
+	wxCommandEvent event(REHex::EV_DISP_SETTING_CHANGED);
 	event.SetEventObject(this);
 	
 	wxPostEvent(this, event);
@@ -387,7 +389,7 @@ void REHex::DocumentCtrl::OnPaint(wxPaintEvent &event)
 {
 	wxBufferedPaintDC dc(this);
 	
-	dc.SetFont(*hex_font);
+	dc.SetFont(hex_font);
 	
 	dc.SetBackground(wxBrush((*active_palette)[Palette::PAL_NORMAL_TEXT_BG]));
 	dc.Clear();
@@ -1825,7 +1827,7 @@ int REHex::DocumentCtrl::hf_string_width(int length)
 	}
 	
 	wxClientDC dc(this);
-	dc.SetFont(*hex_font);
+	dc.SetFont(hex_font);
 	
 	wxSize te = dc.GetTextExtent(std::string(length, 'X'));
 	return te.GetWidth();
@@ -2038,7 +2040,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 {
 	draw_container(doc, dc, x, y);
 	
-	dc.SetFont(*(doc.hex_font));
+	dc.SetFont(doc.hex_font);
 	
 	wxPen norm_fg_1px((*active_palette)[Palette::PAL_NORMAL_TEXT_FG], 1);
 	wxPen selected_bg_1px((*active_palette)[Palette::PAL_SELECTED_TEXT_BG], 1);
@@ -2678,6 +2680,13 @@ REHex::DocumentCtrl::DataRegion::Highlight REHex::DocumentCtrl::DataRegionDocHig
 			active_palette->get_highlight_bg_idx(highlight->second),
 			true);
 	}
+	else if(doc.is_byte_dirty(off))
+	{
+		return Highlight(
+			Palette::PAL_DIRTY_TEXT_FG,
+			Palette::PAL_DIRTY_TEXT_BG,
+			true);
+	}
 	else{
 		return NoHighlight();
 	}
@@ -2721,7 +2730,7 @@ void REHex::DocumentCtrl::CommentRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc
 	int indent_width = doc._indent_width(indent_depth);
 	x += indent_width;
 	
-	dc.SetFont(*(doc.hex_font));
+	dc.SetFont(doc.hex_font);
 	
 	unsigned int row_chars = doc.hf_char_at_x(doc.virtual_width - (2 * indent_width)) - 1;
 	if(row_chars == 0)

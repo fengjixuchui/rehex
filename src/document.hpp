@@ -28,6 +28,7 @@
 #include <wx/wx.h>
 
 #include "buffer.hpp"
+#include "ByteRangeSet.hpp"
 #include "NestedOffsetLengthMap.hpp"
 #include "util.hpp"
 
@@ -38,7 +39,7 @@ namespace REHex {
 	wxDECLARE_EVENT(EV_UNDO_UPDATE,         wxCommandEvent);
 	wxDECLARE_EVENT(EV_BECAME_CLEAN,        wxCommandEvent);
 	wxDECLARE_EVENT(EV_BECAME_DIRTY,        wxCommandEvent);
-	wxDECLARE_EVENT(EV_BASE_CHANGED,        wxCommandEvent);
+	wxDECLARE_EVENT(EV_DISP_SETTING_CHANGED,wxCommandEvent);
 	wxDECLARE_EVENT(EV_HIGHLIGHTS_CHANGED,  wxCommandEvent);
 	
 	class Document: public wxEvtHandler {
@@ -92,6 +93,7 @@ namespace REHex {
 			std::string get_title();
 			std::string get_filename();
 			bool is_dirty();
+			bool is_byte_dirty(off_t offset) const;
 			
 			off_t get_cursor_position() const;
 			CursorState get_cursor_state() const;
@@ -126,12 +128,17 @@ namespace REHex {
 				CursorState old_cursor_state;
 				NestedOffsetLengthMap<Comment> old_comments;
 				NestedOffsetLengthMap<int> old_highlights;
+				
+				bool old_dirty;
+				ByteRangeSet old_dirty_bytes;
 			};
 			
 			Buffer *buffer;
 			std::string filename;
 			
 			bool dirty;
+			ByteRangeSet dirty_bytes;
+			
 			void set_dirty(bool dirty);
 			
 			NestedOffsetLengthMap<Comment> comments;
