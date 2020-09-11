@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <algorithm>
 #include <assert.h>
 #include <ctype.h>
@@ -624,8 +625,9 @@ void REHex::Document::_tracked_change(const char *desc, std::function< void() > 
 	_raise_undo_update();
 }
 
-json_t *REHex::Document::_dump_metadata()
+json_t *REHex::Document::_dump_metadata(bool& has_data)
 {
+	has_data = false;
 	json_t *root = json_object();
 	if(root == NULL)
 	{
@@ -652,6 +654,7 @@ json_t *REHex::Document::_dump_metadata()
 			json_decref(root);
 			return NULL;
 		}
+		has_data = true;
 	}
 	
 	json_t *highlights = json_array();
@@ -672,6 +675,7 @@ json_t *REHex::Document::_dump_metadata()
 			json_decref(root);
 			return NULL;
 		}
+		has_data = true;
 	}
 	
 	return root;
@@ -681,8 +685,17 @@ void REHex::Document::_save_metadata(const std::string &filename)
 {
 	/* TODO: Atomically replace file. */
 	
-	json_t *meta = _dump_metadata();
-	int res = json_dump_file(meta, filename.c_str(), JSON_INDENT(2));
+	bool has_data = false;
+	json_t *meta = _dump_metadata(has_data);
+	int res = 0;
+	if (has_data)
+	{
+		res = json_dump_file(meta, filename.c_str(), JSON_INDENT(2));
+	}
+	else if(wxFileExists(filename))
+	{
+		wxRemoveFile(filename);
+	}
 	json_decref(meta);
 	
 	if(res != 0)
@@ -874,7 +887,7 @@ REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::CommentsDataObject
 	
 	const unsigned char *data = (const unsigned char*)(GetData());
 	const unsigned char *end = data + GetSize();
-	const Header *header;
+	const Header *header = nullptr;
 	
 	while(data + sizeof(Header) < end && (header = (const Header*)(data)), (data + sizeof(Header) + header->text_length <= end))
 	{

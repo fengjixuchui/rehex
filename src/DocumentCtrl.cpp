@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <algorithm>
 #include <assert.h>
 #include <ctype.h>
@@ -52,6 +53,7 @@ enum {
 
 BEGIN_EVENT_TABLE(REHex::DocumentCtrl, wxControl)
 	EVT_PAINT(REHex::DocumentCtrl::OnPaint)
+	EVT_ERASE_BACKGROUND(REHex::DocumentCtrl::OnErase)
 	EVT_SIZE(REHex::DocumentCtrl::OnSize)
 	EVT_SCROLLWIN(REHex::DocumentCtrl::OnScroll)
 	EVT_MOUSEWHEEL(REHex::DocumentCtrl::OnWheel)
@@ -417,6 +419,11 @@ void REHex::DocumentCtrl::OnPaint(wxPaintEvent &event)
 		
 		(*region)->draw(*this, dc, x_px, y_px);
 	}
+}
+
+void REHex::DocumentCtrl::OnErase(wxEraseEvent &event)
+{
+	// Left blank to disable erase
 }
 
 void REHex::DocumentCtrl::OnSize(wxSizeEvent &event)
