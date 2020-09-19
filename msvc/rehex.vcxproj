@@ -187,6 +187,7 @@
     <ClCompile Include="..\src\app.cpp" />
     <ClCompile Include="..\src\ArtProvider.cpp" />
     <ClCompile Include="..\src\buffer.cpp" />
+    <ClCompile Include="..\src\BytesPerLineDialog.cpp" />
     <ClCompile Include="..\src\ByteRangeSet.cpp" />
     <ClCompile Include="..\src\ClickText.cpp" />
     <ClCompile Include="..\src\CodeCtrl.cpp" />
@@ -203,6 +204,7 @@
     <ClCompile Include="..\src\Palette.cpp" />
     <ClCompile Include="..\src\search.cpp" />
     <ClCompile Include="..\src\SelectRangeDialog.cpp" />
+    <ClCompile Include="..\src\StringPanel.cpp" />
     <ClCompile Include="..\src\Tab.cpp" />
     <ClCompile Include="..\src\textentrydialog.cpp" />
     <ClCompile Include="..\src\ToolPanel.cpp" />
@@ -230,6 +232,7 @@
     <ClInclude Include="..\src\app.hpp" />
     <ClInclude Include="..\src\ArtProvider.hpp" />
     <ClInclude Include="..\src\buffer.hpp" />
+    <ClInclude Include="..\src\BytesPerLineDialog.hpp" />
     <ClInclude Include="..\src\ByteRangeSet.hpp" />
     <ClInclude Include="..\src\ClickText.hpp" />
     <ClInclude Include="..\src\CodeCtrl.hpp" />
@@ -252,6 +255,7 @@
     <ClInclude Include="..\src\search.hpp" />
     <ClInclude Include="..\src\SelectRangeDialog.hpp" />
     <ClInclude Include="..\src\SharedDocumentPointer.hpp" />
+    <ClInclude Include="..\src\StringPanel.hpp" />
     <ClInclude Include="..\src\Tab.hpp" />
     <ClInclude Include="..\src\textentrydialog.hpp" />
     <ClInclude Include="..\src\ToolPanel.hpp" />

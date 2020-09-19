@@ -30,6 +30,9 @@
     <ClCompile Include="..\src\buffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\BytesPerLineDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\ByteRangeSet.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -76,6 +79,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\src\SelectRangeDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\StringPanel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\src\Tab.cpp">
@@ -152,6 +158,9 @@
     <ClInclude Include="..\src\buffer.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\BytesPerLineDialog.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\ByteRangeSet.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -213,6 +222,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\src\SharedDocumentPointer.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\StringPanel.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\src\Tab.hpp">
