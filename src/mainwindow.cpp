@@ -31,6 +31,7 @@
 #include "AboutDialog.hpp"
 #include "app.hpp"
 #include "BytesPerLineDialog.hpp"
+#include "FillRangeDialog.hpp"
 #include "mainwindow.hpp"
 #include "NumericEntryDialog.hpp"
 #include "Palette.hpp"
@@ -70,6 +71,7 @@ enum {
 	ID_HEX_OFFSETS,
 	ID_DEC_OFFSETS,
 	ID_SELECT_RANGE,
+	ID_FILL_RANGE,
 	ID_SYSTEM_PALETTE,
 	ID_LIGHT_PALETTE,
 	ID_DARK_PALETTE,
@@ -107,6 +109,7 @@ BEGIN_EVENT_TABLE(REHex::MainWindow, wxFrame)
 	EVT_MENU(wxID_SELECTALL, REHex::MainWindow::OnSelectAll)
 	EVT_MENU(ID_SELECT_RANGE, REHex::MainWindow::OnSelectRange)
 	
+	EVT_MENU(ID_FILL_RANGE, REHex::MainWindow::OnFillRange)
 	EVT_MENU(ID_OVERWRITE_MODE, REHex::MainWindow::OnOverwriteMode)
 	
 	EVT_MENU(ID_SEARCH_TEXT, REHex::MainWindow::OnSearchText)
@@ -187,6 +190,8 @@ REHex::MainWindow::MainWindow():
 	edit_menu->Append(ID_SELECT_RANGE, "Select range...");
 	
 	edit_menu->AppendSeparator();
+	
+	edit_menu->Append(ID_FILL_RANGE, "Fill range...");
 	
 	#ifdef __APPLE__
 	edit_menu->AppendCheckItem(ID_OVERWRITE_MODE, "Overwrite mode");
@@ -648,6 +653,45 @@ void REHex::MainWindow::OnPaste(wxCommandEvent &event)
 	ClipboardGuard cg;
 	if(cg)
 	{
+		/* If there is a selection and it is entirely contained within a Region, give that
+		 * region the chance to handle the paste event.
+		*/
+		
+		off_t selection_off, selection_length;
+		std::tie(selection_off, selection_length) = tab->doc_ctrl->get_selection();
+		
+		if(selection_length > 0)
+		{
+			REHex::DocumentCtrl::GenericDataRegion *selection_region = tab->doc_ctrl->data_region_by_offset(selection_off);
+			assert(selection_region != NULL);
+			
+			assert(selection_region->d_offset <= selection_off);
+			
+			if((selection_region->d_offset + selection_region->d_length) >= (selection_off + selection_length))
+			{
+				if(selection_region->OnPaste(tab->doc_ctrl))
+				{
+					/* Region consumed the paste event. */
+					return;
+				}
+			}
+		}
+		
+		/* Give the region the cursor is in a chance to handle the paste event. */
+		
+		off_t cursor_pos = tab->doc_ctrl->get_cursor_position();
+		
+		REHex::DocumentCtrl::GenericDataRegion *cursor_region = tab->doc_ctrl->data_region_by_offset(cursor_pos);
+		assert(cursor_region != NULL);
+		
+		if(cursor_region->OnPaste(tab->doc_ctrl))
+		{
+			/* Region consumed the paste event. */
+			return;
+		}
+		
+		/* No region consumed the event. Fallback to default handling. */
+		
 		if(wxTheClipboard->IsSupported(CommentsDataObject::format))
 		{
 			CommentsDataObject data;
@@ -707,6 +751,14 @@ void REHex::MainWindow::OnSelectRange(wxCommandEvent &event)
 	
 	REHex::SelectRangeDialog srd(this, *(tab->doc), *(tab->doc_ctrl));
 	srd.ShowModal();
+}
+
+void REHex::MainWindow::OnFillRange(wxCommandEvent &event)
+{
+	Tab *tab = active_tab();
+	
+	REHex::FillRangeDialog frd(this, *(tab->doc), *(tab->doc_ctrl));
+	frd.ShowModal();
 }
 
 void REHex::MainWindow::OnOverwriteMode(wxCommandEvent &event)
@@ -849,7 +901,7 @@ void REHex::MainWindow::OnHexOffsets(wxCommandEvent &event)
 	
 	tab->doc_ctrl->set_offset_display_base(OFFSET_BASE_HEX);
 	
-	_update_status_offset(tab->doc_ctrl);
+	_update_status_offset(tab);
 	_update_status_selection(tab->doc_ctrl);
 }
 
@@ -859,7 +911,7 @@ void REHex::MainWindow::OnDecOffsets(wxCommandEvent &event)
 	
 	tab->doc_ctrl->set_offset_display_base(OFFSET_BASE_DEC);
 	
-	_update_status_offset(tab->doc_ctrl);
+	_update_status_offset(tab);
 	_update_status_selection(tab->doc_ctrl);
 }
 
@@ -961,7 +1013,7 @@ void REHex::MainWindow::OnDocumentChange(wxAuiNotebookEvent& event)
 		tool_panels_menu->Check(menu_id, active);
 	}
 	
-	_update_status_offset(tab->doc_ctrl);
+	_update_status_offset(tab);
 	_update_status_selection(tab->doc_ctrl);
 	_update_status_mode(tab->doc_ctrl);
 	_update_undo(tab->doc);
@@ -1069,7 +1121,7 @@ void REHex::MainWindow::OnCursorUpdate(CursorUpdateEvent &event)
 		/* Only update the status bar if the event originated from the
 		 * active document.
 		*/
-		_update_status_offset(active_tab->doc_ctrl);
+		_update_status_offset(active_tab);
 	}
 	
 	event.Skip();
@@ -1183,11 +1235,11 @@ REHex::Document *REHex::MainWindow::active_document()
 	return active_tab()->doc;
 }
 
-void REHex::MainWindow::_update_status_offset(REHex::DocumentCtrl *doc_ctrl)
+void REHex::MainWindow::_update_status_offset(Tab *tab)
 {
-	off_t off = doc_ctrl->get_cursor_position();
+	off_t off = tab->doc->get_cursor_position();
 	
-	std::string off_text = format_offset(off, doc_ctrl->get_offset_display_base());
+	std::string off_text = format_offset(off, tab->doc_ctrl->get_offset_display_base());
 	
 	SetStatusText(off_text, 0);
 }

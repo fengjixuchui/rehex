@@ -164,11 +164,13 @@
   <ItemGroup>
     <ClCompile Include="..\..\googletest\src\gtest-all.cc" />
     <ClCompile Include="..\..\tests\buffer.cpp" />
+    <ClCompile Include="..\..\tests\ByteRangeMap.cpp" />
     <ClCompile Include="..\..\tests\ByteRangeSet.cpp" />
     <ClCompile Include="..\..\tests\CommentsDataObject.cpp" />
     <ClCompile Include="..\..\tests\CommentTree.cpp" />
     <ClCompile Include="..\..\tests\DiffWindow.cpp" />
     <ClCompile Include="..\..\tests\Document.cpp" />
+    <ClCompile Include="..\..\tests\DocumentCtrl.cpp" />
     <ClCompile Include="..\..\tests\main.cpp" />
     <ClCompile Include="..\..\tests\NestedOffsetLengthMap.cpp" />
     <ClCompile Include="..\..\tests\NumericTextCtrl.cpp" />

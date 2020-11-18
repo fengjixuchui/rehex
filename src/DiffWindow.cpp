@@ -280,7 +280,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 		 * destroyed when wxWidgets next runs idle events.
 		*/
 
-		std::list<DocumentCtrl::Region*> regions;
+		std::vector<DocumentCtrl::Region*> regions;
 		regions.push_back(new DocumentCtrl::DataRegion(0, 0));
 
 		range->doc_ctrl->replace_all_regions(regions);
@@ -324,7 +324,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 
 void REHex::DiffWindow::doc_update(Range *range)
 {
-	std::list<DocumentCtrl::Region*> regions;
+	std::vector<DocumentCtrl::Region*> regions;
 	regions.push_back(new DiffDataRegion(range->offset, range->length, this, range));
 	
 	range->doc_ctrl->replace_all_regions(regions);
@@ -746,6 +746,16 @@ void REHex::DiffWindow::OnToggleASCII(wxCommandEvent &event)
 
 REHex::DiffWindow::DiffDataRegion::DiffDataRegion(off_t d_offset, off_t d_length, DiffWindow *diff_window, Range *range):
 	DataRegion(d_offset, d_length), diff_window(diff_window), range(range) {}
+
+int REHex::DiffWindow::DiffDataRegion::calc_width(REHex::DocumentCtrl &doc)
+{
+	int width = REHex::DocumentCtrl::DataRegion::calc_width(doc);
+	
+	/* Override padding set by base class. */
+	first_line_pad_bytes = 0;
+	
+	return width;
+}
 
 REHex::DocumentCtrl::DataRegion::Highlight REHex::DiffWindow::DiffDataRegion::highlight_at_off(off_t off) const
 {
